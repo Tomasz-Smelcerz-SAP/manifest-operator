@@ -19,14 +19,19 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
+
 	"github.com/go-logr/logr"
 	"github.com/kyma-project/manifest-operator/api/api/v1alpha1"
 	"github.com/kyma-project/manifest-operator/operator/pkg/manifest"
+	"github.com/pkg/errors"
 	"helm.sh/helm/v3/pkg/cli"
 	"k8s.io/apimachinery/pkg/runtime"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -48,12 +53,13 @@ type DeployInfo struct {
 // ManifestReconciler reconciles a Manifest object
 type ManifestReconciler struct {
 	client.Client
-	Scheme       *runtime.Scheme
-	RestConfig   *rest.Config
-	RestMapper   *restmapper.DeferredDiscoveryRESTMapper
-	Workers      *ManifestWorkers
-	DeployChan   chan DeployInfo
-	ResponseChan chan error
+	Scheme                              *runtime.Scheme
+	RestConfig                          *rest.Config
+	RestMapper                          *restmapper.DeferredDiscoveryRESTMapper
+	Workers                             *ManifestWorkers
+	DeployChan                          chan DeployInfo
+	ResponseChan                        chan error
+	ReconciliationTargetKubeconfigFiles []string //Kubeconfigs for the target clusters to install/delete Helm releases.
 }
 
 //+kubebuilder:rbac:groups=component.kyma-project.io,resources=manifests,verbs=get;list;watch;create;update;patch;delete
@@ -183,13 +189,33 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger logr.Log
 	create := deployInfo.Mode == CreateMode
 
 	// TODO: implement better settings handling
-	manifestOperations := manifest.NewOperations(logger, r.RestConfig, cli.New())
+	//namespace, objectNumber, err := splitName(manifestObj.Name)
+	_, objectNumber, err := splitName(manifestObj.Name)
+
+	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+	kubeconfigFile := r.ReconciliationTargetKubeconfigFiles[clusterIndex]
+
+	restConfig, err := clientcmd.BuildConfigFromFlags(
+		"", kubeconfigFile,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"unable to load kubeconfig from %s: %v",
+			kubeconfigFile, err,
+		)
+	}
+
+	indexedReleaseName := fmt.Sprintf("%s-%02d", releaseName, objectNumber)
+	//args["flags"] = args["flags"] + ",Namespace=" + namespace + ",CreateNamespace=true"
+	//fmt.Printf("flags: %s", args["flags"])
+
+	manifestOperations := manifest.NewOperations(logger, restConfig, cli.New())
 	if create {
-		if err := manifestOperations.Install("", releaseName, fmt.Sprintf("%s/%s", repoName, chartName), repoName, url, args); err != nil {
+		if err := manifestOperations.Install("", indexedReleaseName, fmt.Sprintf("%s/%s", repoName, chartName), repoName, url, args); err != nil {
 			return err
 		}
 	} else {
-		if err := manifestOperations.Uninstall("", fmt.Sprintf("%s/%s", repoName, chartName), releaseName, args); err != nil {
+		if err := manifestOperations.Uninstall("", fmt.Sprintf("%s/%s", repoName, chartName), indexedReleaseName, args); err != nil {
 			return err
 		}
 	}
@@ -253,4 +279,32 @@ func (r *ManifestReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Mana
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&v1alpha1.Manifest{}).
 		Complete(r)
+}
+
+//Expects objName in the format: <name>-<number>
+//Returns <name>, <number>, <error>
+func splitName(objName string) (name string, index int, err error) {
+	parts := strings.SplitN(objName, "-", 3)
+	if len(parts) != 3 {
+		return "", 0, errors.Errorf("name not in <name>-<number>-<number> format: \"%s\"", objName)
+	}
+
+	if len(parts[0]) < 2 {
+		return "", 0, errors.Errorf("name prefix too short: \"%s\"", parts[0])
+	}
+
+	if len(parts[2]) < 1 {
+		return "", 0, errors.New("index is empty")
+	}
+
+	index, err = strconv.Atoi(parts[2])
+	if err != nil {
+		return "", 0, errors.Wrap(err, "error converting name suffix to an int")
+	}
+
+	if index < 0 || index > 9999999 {
+		return "", 0, errors.Errorf("Invalid index range: %d", index)
+	}
+
+	return parts[0] + "-" + parts[1], index, nil
 }

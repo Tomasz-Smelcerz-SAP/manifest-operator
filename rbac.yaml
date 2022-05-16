@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    control-plane: manifest-operator
+  name: manifest-operator
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: manifest-operator
+  namespace: manifest-operator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manifest-operator-role
+rules:
+- apiGroups:
+  - component.kyma-project.io
+  resources:
+  - manifests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - component.kyma-project.io
+  resources:
+  - manifests/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - component.kyma-project.io
+  resources:
+  - manifests/status
+  verbs:
+  - get
+  - patch
+  - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: manifest-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: manifest-operator-role
+subjects:
+- kind: ServiceAccount
+  name: manifest-operator
+  namespace: manifest-operator
