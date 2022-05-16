@@ -18,7 +18,9 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
+	"strings"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -63,6 +65,24 @@ func main() {
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	reconciliationTargetKubeconfigs := []string{}
+
+	for _, e := range os.Environ() {
+		pair := strings.SplitN(e, "=", 2)
+		if strings.HasPrefix(pair[0], "RECONCILIATION_TARGET_KUBECONFIG") {
+			reconciliationTargetKubeconfigs = append(reconciliationTargetKubeconfigs, pair[1])
+		}
+	}
+
+	if len(reconciliationTargetKubeconfigs) < 1 {
+		panic("No \"RECONCILIATION_TARGET_KUBECONFIG_<INDEX>\" variables defined")
+	}
+
+	fmt.Println("----------------------------------------")
+	fmt.Println("Configured KUBECONFIG files:")
+	fmt.Println(reconciliationTargetKubeconfigs)
+	fmt.Println("----------------------------------------")
+
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -79,8 +99,9 @@ func main() {
 	}
 
 	if err = (&controllers.ManifestReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:                              mgr.GetClient(),
+		Scheme:                              mgr.GetScheme(),
+		ReconciliationTargetKubeconfigFiles: reconciliationTargetKubeconfigs,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Manifest")
 		os.Exit(1)

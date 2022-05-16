@@ -18,11 +18,22 @@ package controllers
 
 import (
 	"context"
+	"crypto/sha1"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/gofrs/flock"
 	"github.com/kyma-project/manifest-operator/api/api/v1alpha1"
 	"github.com/pkg/errors"
+	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/cli/values"
@@ -30,28 +41,21 @@ import (
 	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/repo"
 	"helm.sh/helm/v3/pkg/strvals"
-	"io/ioutil"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"os"
-	"path/filepath"
-	"reflect"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
-
-	"helm.sh/helm/v3/pkg/action"
-	_ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
 // ManifestReconciler reconciles a Manifest object
 type ManifestReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme                              *runtime.Scheme
+	ReconciliationTargetKubeconfigFiles []string //Kubeconfigs for the target clusters to install/delete Helm releases.
 }
 
 //+kubebuilder:rbac:groups=component.kyma-project.io,resources=manifests,verbs=get;list;watch;create;update;patch;delete
@@ -87,10 +91,29 @@ func (r *ManifestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		repoName    = manifestObj.Spec.RepoName
 		url         = manifestObj.Spec.Url
 		chartName   = manifestObj.Spec.ChartName
-		releaseName = manifestObj.Spec.ReleaseName
+		releaseName = manifestObj.Name
 	)
 
+	h := sha1.New()
+	h.Write([]byte(manifestObj.Name))
+	bs := h.Sum(nil)
+	namespace := fmt.Sprintf("%x", bs)
+
+	logger.Info("Calculated namespace name", "value", namespace)
+
+	_, objectNumber, err := r.splitName(manifestObj.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	index := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+	logger.Info("Calculated cluster index", "value", index)
+
+	kubeconfig := r.ReconciliationTargetKubeconfigFiles[index]
+
 	settings := cli.New()
+	settings.KubeConfig = kubeconfig
+	settings.SetNamespace(namespace)
 
 	// evaluate create or delete chart
 	create, err := strconv.ParseBool(manifestObj.Spec.CreateChart)
@@ -99,6 +122,12 @@ func (r *ManifestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	if create {
+		//Ensure Namespace exists
+		err := r.createNamespace(ctx, namespace, settings)
+		if !apierrors.IsAlreadyExists(err) {
+			return ctrl.Result{}, err
+		}
+
 		if err := r.AddHelmRepo(settings, repoName, url, logger); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -118,6 +147,11 @@ func (r *ManifestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	} else {
 		if err := r.UninstallChart(settings, releaseName, logger); err != nil {
+			return ctrl.Result{}, err
+		}
+
+		err := r.deleteNamespace(ctx, namespace, settings)
+		if !apierrors.IsNotFound(err) {
 			return ctrl.Result{}, err
 		}
 	}
@@ -149,7 +183,8 @@ func (r *ManifestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *ManifestReconciler) GetChart(releaseName string, settings *cli.EnvSettings, logger logr.Logger) (bool, error) {
 	actionConfig := new(action.Configuration)
 	if err := actionConfig.Init(settings.RESTClientGetter(), settings.Namespace(), os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
-		fmt.Sprintf(format, v)
+		le := fmt.Sprintf(format, v)
+		logger.Info("actionConfig.Init:", "message", le)
 	}); err != nil {
 		return false, err
 	}
@@ -165,7 +200,8 @@ func (r *ManifestReconciler) InstallChart(settings *cli.EnvSettings, logger logr
 	// setup helm client
 	actionConfig := new(action.Configuration)
 	if err := actionConfig.Init(settings.RESTClientGetter(), settings.Namespace(), os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
-		fmt.Sprintf(format, v)
+		le := fmt.Sprintf(format, v)
+		logger.Info("actionConfig.Init:", "message", le)
 	}); err != nil {
 		return err
 	}
@@ -299,6 +335,7 @@ func (r *ManifestReconciler) RepoUpdate(settings *cli.EnvSettings, logger logr.L
 func (r *ManifestReconciler) AddHelmRepo(settings *cli.EnvSettings, repoName string, url string, logger logr.Logger) error {
 	repoFile := settings.RepositoryConfig
 
+	logger.Info("Repository File:", "value:", repoFile)
 	// File locking mechanism
 	if err := os.MkdirAll(filepath.Dir(repoFile), os.ModePerm); err != nil && !os.IsExist(err) {
 		return err
@@ -356,7 +393,8 @@ func (r *ManifestReconciler) UninstallChart(settings *cli.EnvSettings, releaseNa
 	}
 	actionConfig := new(action.Configuration)
 	if err := actionConfig.Init(settings.RESTClientGetter(), settings.Namespace(), os.Getenv("HELM_DRIVER"), func(format string, v ...interface{}) {
-		fmt.Sprintf(format, v)
+		le := fmt.Sprintf(format, v)
+		logger.Info("actionConfig.Init:", "message", le)
 	}); err != nil {
 		return err
 	}
@@ -367,4 +405,57 @@ func (r *ManifestReconciler) UninstallChart(settings *cli.EnvSettings, releaseNa
 	}
 	logger.Info("chart deletion executed", "response", response.Release.Info.Description)
 	return nil
+}
+
+//Expects objName in the format: <name>-<number>
+//Returns <name>, <number>, <error>
+func (r *ManifestReconciler) splitName(objName string) (name string, index int, err error) {
+	parts := strings.SplitN(objName, "-", 2)
+	if len(parts) != 2 {
+		return "", 0, errors.Errorf("name not in <name>-<number> format: \"%s\"", objName)
+	}
+
+	if len(parts[0]) < 2 {
+		return "", 0, errors.Errorf("name prefix too short: \"%s\"", parts[0])
+	}
+
+	if len(parts[1]) < 1 {
+		return "", 0, errors.New("index is empty")
+	}
+
+	index, err = strconv.Atoi(parts[1])
+	if err != nil {
+		return "", 0, errors.Wrap(err, "error converting name suffix to an int")
+	}
+
+	if index < 0 || index > 9999999 {
+		return "", 0, errors.Errorf("Invalid index range: %d", index)
+	}
+
+	return parts[0], index, nil
+}
+
+//createNamespace ensures the namespace exists
+func (r *ManifestReconciler) createNamespace(ctx context.Context, name string, settings *cli.EnvSettings) error {
+	//Creating new client because I don't know how to re-use the one Helm is using underneath...
+	rc, err := settings.RESTClientGetter().ToRESTConfig()
+	if err != nil {
+		return err
+	}
+	nsClient, err := client.New(rc, client.Options{})
+	namespaceObj := &corev1.Namespace{}
+	namespaceObj.Name = name
+	return nsClient.Create(ctx, namespaceObj)
+}
+
+func (r *ManifestReconciler) deleteNamespace(ctx context.Context, name string, settings *cli.EnvSettings) error {
+	//Creating new client because I don't know how to re-use the one Helm is using underneath...
+	rc, err := settings.RESTClientGetter().ToRESTConfig()
+	if err != nil {
+		return err
+	}
+	nsClient, err := client.New(rc, client.Options{})
+	namespaceObj := &corev1.Namespace{}
+	namespaceObj.Name = name
+	return nsClient.Delete(ctx, namespaceObj)
 }
