@@ -19,20 +19,26 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
+
+	"time"
+
 	"github.com/go-logr/logr"
 	"github.com/kyma-project/manifest-operator/api/api/v1alpha1"
 	"github.com/kyma-project/manifest-operator/operator/pkg/manifest"
+	"github.com/pkg/errors"
 	"helm.sh/helm/v3/pkg/cli"
 	"k8s.io/apimachinery/pkg/runtime"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
+	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"time"
 )
 
 type Mode int
@@ -59,11 +65,12 @@ type DeployInfo struct {
 // ManifestReconciler reconciles a Manifest object
 type ManifestReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	RestConfig *rest.Config
-	RestMapper *restmapper.DeferredDiscoveryRESTMapper
-	DeployChan chan DeployInfo
-	Workers    *ManifestWorkers
+	Scheme                              *runtime.Scheme
+	RestConfig                          *rest.Config
+	RestMapper                          *restmapper.DeferredDiscoveryRESTMapper
+	DeployChan                          chan DeployInfo
+	ReconciliationTargetKubeconfigFiles []string //Kubeconfigs for the target clusters to install/delete Helm releases.
+	Workers                             *ManifestWorkers
 }
 
 type RequestError struct {
@@ -209,7 +216,27 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	create := deployInfo.Mode == CreateMode
 
 	// TODO: implement better settings handling
-	manifestOperations := manifest.NewOperations(logger, r.RestConfig, cli.New(), WaitTimeout)
+	//namespace, objectNumber, err := splitName(manifestObj.Name)
+	_, objectNumber, err := splitName(manifestObj.Name)
+
+	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+	kubeconfigFile := r.ReconciliationTargetKubeconfigFiles[clusterIndex]
+
+	restConfig, err := clientcmd.BuildConfigFromFlags(
+		"", kubeconfigFile,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"unable to load kubeconfig from %s: %v",
+			kubeconfigFile, err,
+		)
+	}
+
+	indexedReleaseName := fmt.Sprintf("%s-%02d", releaseName, objectNumber)
+	//args["flags"] = args["flags"] + ",Namespace=" + namespace + ",CreateNamespace=true"
+	//fmt.Printf("flags: %s", args["flags"])
+
+	manifestOperations := manifest.NewOperations(logger, restConfig, cli.New(), WaitTimeout)
 	var err error
 
 	if create {
@@ -295,4 +322,32 @@ func (r *ManifestReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Mana
 			MaxConcurrentReconciles: DefaultWorkersCount,
 		}).
 		Complete(r)
+}
+
+//Expects objName in the format: <name>-<number>
+//Returns <name>, <number>, <error>
+func splitName(objName string) (name string, index int, err error) {
+	parts := strings.SplitN(objName, "-", 3)
+	if len(parts) != 3 {
+		return "", 0, errors.Errorf("name not in <name>-<number>-<number> format: \"%s\"", objName)
+	}
+
+	if len(parts[0]) < 2 {
+		return "", 0, errors.Errorf("name prefix too short: \"%s\"", parts[0])
+	}
+
+	if len(parts[2]) < 1 {
+		return "", 0, errors.New("index is empty")
+	}
+
+	index, err = strconv.Atoi(parts[2])
+	if err != nil {
+		return "", 0, errors.Wrap(err, "error converting name suffix to an int")
+	}
+
+	if index < 0 || index > 9999999 {
+		return "", 0, errors.Errorf("Invalid index range: %d", index)
+	}
+
+	return parts[0] + "-" + parts[1], index, nil
 }

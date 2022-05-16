@@ -1,0 +1,13 @@
+apiVersion: component.kyma-project.io/v1alpha1
+kind: Manifest
+metadata:
+  # Format for the name is <prefix>-<number>.
+  # The object number is used for cluster selection. To ensure equal distribution among clusters, it should grow by one for every new object.
+  name: loadtest-1-01
+spec:
+  charts:
+  - releaseName: "foobar" 
+    repoName: "abc"
+    url: "https://estahn.github.io/charts"
+    chartName: "httpbingo"
+    clientConfig: "--version=0.1.0"
