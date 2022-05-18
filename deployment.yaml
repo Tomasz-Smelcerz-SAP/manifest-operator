@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: manifest-operator
+  namespace: manifest-operator
+  labels:
+    app: manifest-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: manifest-operator
+  template:
+    metadata:
+      labels:
+        app: manifest-operator
+    spec:
+      containers:
+      - name: operator 
+        image: tsmsap/manifest-operator:09-11
+        env:
+        - name: RECONCILIATION_TARGET_KUBECONFIG_0
+          value: "/etc/manifest-operator-config/target-kubeconfig-0.yaml"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/etc/manifest-operator-config/gcp-service-account-key.json"
+        volumeMounts:
+        - name: manifest-operator-config
+          mountPath: "/etc/manifest-operator-config"
+          readOnly: true 
+      volumes:
+      - name: manifest-operator-config
+        secret:
+          secretName: manifest-operator-config
+          optional: false
+      serviceAccountName: manifest-operator

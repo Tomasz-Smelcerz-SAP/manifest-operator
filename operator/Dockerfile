@@ -11,7 +11,7 @@ RUN go mod download
 
 # Copy the go source
 COPY main.go main.go
-COPY api/ api/
+# COPY ../api/ api/
 COPY controllers/ controllers/
 
 # Build
@@ -19,9 +19,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:nonroot
+#FROM gcr.io/distroless/static:nonroot
+FROM alpine:3.15.4
 WORKDIR /
 COPY --from=builder /workspace/manager .
-USER 65532:65532
+RUN mkdir /.config
+RUN chown 65532:65532 /.config
+RUN chmod u+rw /.config
+#USER 65532:65532
+#USER root:root
 
 ENTRYPOINT ["/manager"]
