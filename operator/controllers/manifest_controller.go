@@ -46,6 +46,7 @@ const (
 )
 
 type DeployInfo struct {
+	manifestKey client.ObjectKey
 	*v1alpha1.ChartInfo
 	Mode
 }
@@ -128,11 +129,12 @@ func (r *ManifestReconciler) HandleDeletingState(ctx context.Context, logger *lo
 func (r *ManifestReconciler) jobAllocator(ctx context.Context, logger *logr.Logger, manifestObj *v1alpha1.Manifest, mode Mode) error {
 	chartCount := len(manifestObj.Spec.Charts)
 
-	go r.ResponseHandlerFunc(ctx, chartCount, logger, client.ObjectKey{Namespace: manifestObj.Namespace, Name: manifestObj.Name})
+	objKey := client.ObjectKey{Namespace: manifestObj.Namespace, Name: manifestObj.Name}
+	go r.ResponseHandlerFunc(ctx, chartCount, logger, objKey)
 
 	// send job to workers
 	for _, chart := range manifestObj.Spec.Charts {
-		r.DeployChan <- DeployInfo{&chart, mode}
+		r.DeployChan <- DeployInfo{objKey, &chart, mode}
 	}
 
 	return nil
@@ -189,10 +191,10 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger logr.Log
 	create := deployInfo.Mode == CreateMode
 
 	// TODO: implement better settings handling
-	//namespace, objectNumber, err := splitName(manifestObj.Name)
-	_, objectNumber, err := splitName(manifestObj.Name)
+	targetNamespace, objectNumber, err := splitName(deployInfo.manifestKey.Name)
 
 	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+	// TODO: Fetch it's contents from a secret in the current cluster instead of pointing to a local file
 	kubeconfigFile := r.ReconciliationTargetKubeconfigFiles[clusterIndex]
 
 	restConfig, err := clientcmd.BuildConfigFromFlags(
@@ -206,8 +208,10 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger logr.Log
 	}
 
 	indexedReleaseName := fmt.Sprintf("%s-%02d", releaseName, objectNumber)
-	//args["flags"] = args["flags"] + ",Namespace=" + namespace + ",CreateNamespace=true"
-	//fmt.Printf("flags: %s", args["flags"])
+	// Enforcing target namespace
+	args["flags"] = args["flags"] + ",Namespace=" + targetNamespace + ",CreateNamespace=true"
+	// TODO: Remove
+	fmt.Printf("flags: %s", args["flags"])
 
 	manifestOperations := manifest.NewOperations(logger, restConfig, cli.New())
 	if create {
