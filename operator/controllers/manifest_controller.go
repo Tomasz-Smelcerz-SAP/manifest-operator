@@ -57,6 +57,7 @@ type RequestErrChan chan *RequestError
 
 type DeployInfo struct {
 	v1alpha1.ChartInfo
+	manifestKey client.ObjectKey
 	Mode
 	client.ObjectKey
 	RequestErrChan
@@ -216,10 +217,10 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	create := deployInfo.Mode == CreateMode
 
 	// TODO: implement better settings handling
-	//namespace, objectNumber, err := splitName(manifestObj.Name)
-	_, objectNumber, err := splitName(manifestObj.Name)
+	targetNamespace, objectNumber, err := splitName(deployInfo.manifestKey.Name)
 
 	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+	// TODO: Fetch it's contents from a secret in the current cluster instead of pointing to a local file
 	kubeconfigFile := r.ReconciliationTargetKubeconfigFiles[clusterIndex]
 
 	restConfig, err := clientcmd.BuildConfigFromFlags(
@@ -233,8 +234,10 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	}
 
 	indexedReleaseName := fmt.Sprintf("%s-%02d", releaseName, objectNumber)
-	//args["flags"] = args["flags"] + ",Namespace=" + namespace + ",CreateNamespace=true"
-	//fmt.Printf("flags: %s", args["flags"])
+	// Enforcing target namespace
+	args["flags"] = args["flags"] + ",Namespace=" + targetNamespace + ",CreateNamespace=true"
+	// TODO: Remove
+	fmt.Printf("flags: %s", args["flags"])
 
 	manifestOperations := manifest.NewOperations(logger, restConfig, cli.New(), WaitTimeout)
 	var err error

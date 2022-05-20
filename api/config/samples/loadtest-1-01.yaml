@@ -10,4 +10,4 @@ spec:
     repoName: "abc"
     url: "https://estahn.github.io/charts"
     chartName: "httpbingo"
-    clientConfig: "--version=0.1.0"
+    clientConfig: "Version=0.1.0"
