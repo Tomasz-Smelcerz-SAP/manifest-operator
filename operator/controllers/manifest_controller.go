@@ -236,8 +236,9 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	indexedReleaseName := fmt.Sprintf("%s-%02d", releaseName, objectNumber)
 	// Enforcing target namespace
 	args["flags"] = args["flags"] + ",Namespace=" + targetNamespace + ",CreateNamespace=true"
-	// TODO: Remove
-	fmt.Printf("flags: %s", args["flags"])
+
+	logger.Info(fmt.Sprintf("Install flags: %s", args["flags"]))
+	logger.Info(fmt.Sprintf("Kubeconfig file: %s", kubeconfigFile))
 
 	manifestOperations := manifest.NewOperations(logger, restConfig, cli.New(), WaitTimeout)
 	var err error
