@@ -17,10 +17,16 @@ spec:
     spec:
       containers:
       - name: operator 
-        image: tsmsap/manifest-operator:09-11
+        image: tsmsap/manifest-operator:14-24
         env:
         - name: RECONCILIATION_TARGET_KUBECONFIG_0
           value: "/etc/manifest-operator-config/target-kubeconfig-0.yaml"
+        - name: RECONCILIATION_TARGET_KUBECONFIG_1
+          value: "/etc/manifest-operator-config/target-kubeconfig-1.yaml"
+        - name: RECONCILIATION_TARGET_KUBECONFIG_2
+          value: "/etc/manifest-operator-config/target-kubeconfig-2.yaml"
+        - name: RECONCILIATION_TARGET_KUBECONFIG_3
+          value: "/etc/manifest-operator-config/target-kubeconfig-3.yaml"
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: "/etc/manifest-operator-config/gcp-service-account-key.json"
         volumeMounts:
