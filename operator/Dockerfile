@@ -27,7 +27,12 @@ COPY --from=builder /workspace/manager .
 RUN mkdir /.config
 RUN chown 65532:65532 /.config
 RUN chmod u+rw /.config
-#USER 65532:65532
+
+RUN mkdir /.cache
+RUN chown 65532:65532 /.cache
+RUN chmod u+rwx /.cache
+
+USER 65532:65532
 #USER root:root
 
 ENTRYPOINT ["/manager"]
