@@ -8,7 +8,7 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: ctrlman
   namespace: system
   labels:
     control-plane: controller-manager
@@ -71,7 +71,7 @@ spec:
         - name: manifest-operator-targets
           mountPath: "/etc/manifest-operator-targets-config"
           readOnly: true 
-      serviceAccountName: controller-manager
+      serviceAccountName: ctrlman
       terminationGracePeriodSeconds: 10
       volumes:
       - name: manifest-operator-targets
