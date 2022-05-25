@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"fmt"
+
 	"github.com/go-logr/logr"
 	manifestRest "github.com/kyma-project/manifest-operator/operator/pkg/rest"
 	"github.com/kyma-project/manifest-operator/operator/pkg/util"
@@ -146,6 +147,5 @@ func (o *Operations) getManifestForChartPath(chartPath, chartName string, action
 	if err != nil {
 		return "", err
 	}
-	fmt.Println(release.Manifest)
 	return release.Manifest, nil
 }
