@@ -2,6 +2,9 @@ package manifest
 
 import (
 	"fmt"
+
+	"time"
+
 	"github.com/go-logr/logr"
 	manifestRest "github.com/kyma-project/manifest-operator/operator/pkg/rest"
 	"github.com/kyma-project/manifest-operator/operator/pkg/util"
@@ -12,7 +15,6 @@ import (
 	"helm.sh/helm/v3/pkg/strvals"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	"time"
 )
 
 type Operations struct {
@@ -155,7 +157,5 @@ func (o *Operations) getManifestForChartPath(chartPath, chartName string, action
 	if err != nil {
 		return "", err
 	}
-	// TODO: Uncomment below to print manifest
-	//fmt.Println(release.Manifest)
 	return release.Manifest, nil
 }
