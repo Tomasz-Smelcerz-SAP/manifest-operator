@@ -8,6 +8,6 @@ spec:
   charts: 
   - releaseName: "foobar" 
     repoName: "abc"
-    url: "https://estahn.github.io/charts"
-    chartName: "httpbingo"
-    clientConfig: "Version=0.1.0,Namespace=padu,CreateNamespace=true"
+    url: "https://storage.googleapis.com/lt-charts"
+    chartName: "kyma-load-test"
+    clientConfig: "Version=0.3.0"
