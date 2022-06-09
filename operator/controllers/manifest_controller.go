@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"time"
 
@@ -29,7 +30,9 @@ import (
 	"github.com/kyma-project/manifest-operator/operator/pkg/manifest"
 	"github.com/pkg/errors"
 	"helm.sh/helm/v3/pkg/cli"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
@@ -121,13 +124,13 @@ func (r *ManifestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	case "":
 		return ctrl.Result{}, r.HandleInitialState(ctx, &logger, &manifestObj)
 	case v1alpha1.ManifestStateProcessing:
-		return ctrl.Result{}, r.HandleProcessingState(ctx, &logger, &manifestObj)
+		return ctrl.Result{RequeueAfter: time.Second * 60}, r.HandleProcessingState(ctx, &logger, &manifestObj)
 	case v1alpha1.ManifestStateDeleting:
 		return ctrl.Result{}, r.HandleDeletingState(ctx, &logger, &manifestObj)
 	case v1alpha1.ManifestStateError:
-		return ctrl.Result{}, r.HandleErrorState(ctx, &logger, &manifestObj)
+		return ctrl.Result{RequeueAfter: time.Second * 600}, r.HandleErrorState(ctx, &logger, &manifestObj)
 	case v1alpha1.ManifestStateReady:
-		return ctrl.Result{}, r.HandleReadyState(ctx, &logger, &manifestObj)
+		return ctrl.Result{RequeueAfter: time.Second * 3600}, r.HandleReadyState(ctx, &logger, &manifestObj)
 	}
 
 	// should not be reconciled again
@@ -139,7 +142,93 @@ func (r *ManifestReconciler) HandleInitialState(ctx context.Context, _ *logr.Log
 }
 
 func (r *ManifestReconciler) HandleProcessingState(ctx context.Context, logger *logr.Logger, manifestObj *v1alpha1.Manifest) error {
+
+	//Because deletion condition is handled further down in the jobAllocator call chain, this redundant check here is necessary
+	if manifestObj.DeletionTimestamp.IsZero() {
+		//Check here if the target object is ready
+		//If so, set the Manifest CR status to Ready and exit from here
+		targetObjectReady := r.checkTargetObject(ctx, logger, manifestObj)
+		if targetObjectReady {
+			if manifestObj.Status.State != v1alpha1.ManifestStateReady {
+				if err := r.updateManifestStatus(ctx, manifestObj, v1alpha1.ManifestStateReady, "target object is ready"); err != nil {
+					objKey := client.ObjectKey{Namespace: manifestObj.Namespace, Name: manifestObj.Name}
+					logger.Error(err, "error updating status", "resource", objKey)
+				}
+			}
+			return nil
+		}
+	}
 	return r.jobAllocator(ctx, logger, manifestObj, CreateMode)
+}
+
+func (r *ManifestReconciler) checkTargetObject(ctx context.Context, logger *logr.Logger, manifestObj *v1alpha1.Manifest) bool {
+
+	targetNamespace, objectSuffix, err := splitName(manifestObj.Name)
+	if err != nil {
+		logger.Error(err, "error checking target object state for manifest", "manifest", manifestObj.Namespace+"/"+manifestObj.Name)
+		return false
+	}
+	objectNumber, err := parseNumber(objectSuffix)
+	if err != nil {
+		logger.Error(err, "error checking target object state for manifest", "manifest", manifestObj.Namespace+"/"+manifestObj.Name)
+		return false
+	}
+
+	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+
+	//namespace := "loadtest-1"
+	//name := foobar-00-kyma-load-test"
+	//TODO: Ensure it's consistent with what Helm is actually generating.
+	targetName := fmt.Sprintf("%s-%s-%s", manifestObj.Spec.Charts[0].ReleaseName, objectSuffix, manifestObj.Spec.Charts[0].ChartName)
+
+	targetObjKey := client.ObjectKey{Namespace: targetNamespace, Name: targetName}
+	targetObj := unstructured.Unstructured{}
+
+	targetObj.SetGroupVersionKind(schema.GroupVersionKind{Group: "kyma.kyma-project.io", Version: "v1alpha1", Kind: "LongOperation"})
+	targetObj.SetName(targetName)
+	targetObj.SetNamespace(targetNamespace)
+
+	kubeconfigFile := r.ReconciliationTargetKubeconfigFiles[clusterIndex]
+
+	// TODO: This function is best invoked with the target cluster client injected
+	restConfig, err := clientcmd.BuildConfigFromFlags(
+		"", kubeconfigFile,
+	)
+	if err != nil {
+		logger.Error(fmt.Errorf(
+			"unable to load kubeconfig from %s: %v",
+			kubeconfigFile, err,
+		), "error checking target object state", "resource", targetObjKey)
+		return false
+	}
+
+	//TODO: Another client!
+	kc, err := client.New(restConfig, client.Options{})
+	if err != nil {
+		logger.Error(err, "error checking target object state", "resource", targetObjKey)
+		return false
+	}
+
+	err = kc.Get(ctx, targetObjKey, &targetObj)
+	if err != nil {
+		logger.Error(err, "error checking target object state", "resource", targetObjKey)
+		return false
+	}
+
+	logger.Info("target object exists", "resource", targetObjKey)
+	status, statusExists, err := unstructured.NestedString(targetObj.Object, "status", "state")
+	if err != nil {
+		logger.Error(err, "error checking target object state", "resource", targetObjKey)
+		return false
+	}
+
+	if statusExists {
+		logger.Info("target object status is:"+status, "resource", targetObjKey)
+		return status == "Ready"
+	}
+
+	logger.Info("target object has no status", "resource", targetObjKey)
+	return false
 }
 
 func (r *ManifestReconciler) HandleDeletingState(ctx context.Context, logger *logr.Logger, manifestObj *v1alpha1.Manifest) error {
@@ -216,8 +305,14 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	// evaluate create or delete chart
 	create := deployInfo.Mode == CreateMode
 
-	// TODO: implement better settings handling
-	targetNamespace, objectNumber, err := splitName(deployInfo.manifestKey.Name)
+	targetNamespace, objectSuffix, err := splitName(deployInfo.manifestKey.Name)
+	if err != nil {
+		return err
+	}
+	objectNumber, err := parseNumber(objectSuffix)
+	if err != nil {
+		return err
+	}
 
 	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
 	// TODO: Fetch it's contents from a secret in the current cluster instead of pointing to a local file
@@ -328,30 +423,35 @@ func (r *ManifestReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Mana
 		Complete(r)
 }
 
-//Expects objName in the format: <name>-<number>
-//Returns <name>, <number>, <error>
-func splitName(objName string) (name string, index int, err error) {
+//Expects objName in the format: <name>-<number1>-<number2>
+//Returns "<name>-<number1>", "<number2>", <error>
+func splitName(objName string) (name string, index string, err error) {
 	parts := strings.SplitN(objName, "-", 3)
 	if len(parts) != 3 {
-		return "", 0, errors.Errorf("name not in <name>-<number>-<number> format: \"%s\"", objName)
+		return "", "", errors.Errorf("name not in <name>-<number>-<number> format: \"%s\"", objName)
 	}
 
 	if len(parts[0]) < 2 {
-		return "", 0, errors.Errorf("name prefix too short: \"%s\"", parts[0])
+		return "", "", errors.Errorf("name prefix too short: \"%s\"", parts[0])
 	}
 
 	if len(parts[2]) < 1 {
-		return "", 0, errors.New("index is empty")
+		return "", "", errors.New("suffix is empty")
 	}
 
-	index, err = strconv.Atoi(parts[2])
+	return parts[0] + "-" + parts[1], parts[2], nil
+}
+
+func parseNumber(value string) (int, error) {
+	res, err := strconv.Atoi(value)
+
 	if err != nil {
-		return "", 0, errors.Wrap(err, "error converting name suffix to an int")
+		return 0, errors.Wrap(err, "error converting value to an int")
 	}
 
-	if index < 0 || index > 9999999 {
-		return "", 0, errors.Errorf("Invalid index range: %d", index)
+	if res < 0 || res > 9999999 {
+		return 0, errors.Errorf("Invalid range for a value: %s", value)
 	}
 
-	return parts[0] + "-" + parts[1], index, nil
+	return res, nil
 }
