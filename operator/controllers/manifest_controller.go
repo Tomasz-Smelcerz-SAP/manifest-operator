@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -161,21 +162,14 @@ func (r *ManifestReconciler) HandleProcessingState(ctx context.Context, logger *
 
 func (r *ManifestReconciler) checkTargetObject(ctx context.Context, logger *logr.Logger, manifestObj *v1alpha1.Manifest) bool {
 
-	targetNamespace, objectSuffix, err := splitName(manifestObj.Name)
-	if err != nil {
-		logger.Error(err, "error checking target object state for manifest", "manifest", manifestObj.Namespace+"/"+manifestObj.Name)
-		return false
-	}
-	objectNumber, err := parseNumber(objectSuffix)
+	targetNamespace, objectSuffix, clusterIndexBase, err := loadTestingNameParsing(manifestObj.Name)
 	if err != nil {
 		logger.Error(err, "error checking target object state for manifest", "manifest", manifestObj.Namespace+"/"+manifestObj.Name)
 		return false
 	}
 
-	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+	clusterIndex := clusterIndexBase % len(r.ReconciliationTargetKubeconfigFiles)
 
-	//namespace := "loadtest-1"
-	//name := foobar-00-kyma-load-test"
 	//TODO: Ensure it's consistent with what Helm is actually generating.
 	targetName := fmt.Sprintf("%s-%s-%s", manifestObj.Spec.Charts[0].ReleaseName, objectSuffix, manifestObj.Spec.Charts[0].ChartName)
 
@@ -307,16 +301,12 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	// evaluate create or delete chart
 	create := deployInfo.Mode == CreateMode
 
-	targetNamespace, objectSuffix, err := splitName(deployInfo.manifestKey.Name)
-	if err != nil {
-		return wErr(err)
-	}
-	objectNumber, err := parseNumber(objectSuffix)
+	targetNamespace, objectSuffix, clusterIndexBase, err := loadTestingNameParsing(deployInfo.manifestKey.Name)
 	if err != nil {
 		return wErr(err)
 	}
 
-	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
+	clusterIndex := clusterIndexBase % len(r.ReconciliationTargetKubeconfigFiles)
 	// TODO: Fetch it's contents from a secret in the current cluster instead of pointing to a local file
 	kubeconfigFile := r.ReconciliationTargetKubeconfigFiles[clusterIndex]
 
@@ -330,7 +320,7 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 		))
 	}
 
-	indexedReleaseName := fmt.Sprintf("%s-%02d", releaseName, objectNumber)
+	indexedReleaseName := fmt.Sprintf("%s-%s", releaseName, objectSuffix)
 
 	// Enforcing target namespace
 	args["flags"] = args["flags"] + ",Namespace=" + targetNamespace + ",CreateNamespace=true"
@@ -341,9 +331,9 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	manifestOperations := manifest.NewOperations(logger, restConfig, cli.New(), WaitTimeout)
 
 	if create {
-		err = manifestOperations.Install("", releaseName, fmt.Sprintf("%s/%s", repoName, chartName), repoName, url, args)
+		err = manifestOperations.Install("", indexedReleaseName, fmt.Sprintf("%s/%s", repoName, chartName), repoName, url, args)
 	} else {
-		err = manifestOperations.Uninstall("", fmt.Sprintf("%s/%s", repoName, chartName), releaseName, args)
+		err = manifestOperations.Uninstall("", fmt.Sprintf("%s/%s", repoName, chartName), indexedReleaseName, args)
 	}
 
 	return &RequestError{
@@ -465,4 +455,21 @@ func wrapErr(namespacedName client.ObjectKey) func(error) *RequestError {
 			Err:               err,
 		}
 	}
+}
+
+func loadTestingNameParsing(manifestCRName string) (targetNamespace string, objectSuffix string, clusterIndex int, err error) {
+
+	//example: "manifest11-for-ltkyma-12-13" => targetNamespace: "kyma-12-13", objectSuffix: "11", clusterIndex: 13
+	r, err := regexp.Compile("([^0-9]+)([0-9]+)([^0-9]+lt)(kyma[-][0-9]+[-])([0-9]+)$")
+	if err != nil {
+		return
+	}
+
+	matches := r.FindAllStringSubmatch(manifestCRName, -1)
+
+	objectSuffix = matches[0][2]
+	clusterIndexValue := matches[0][5]
+	targetNamespace = matches[0][4] + clusterIndexValue
+	clusterIndex, err = parseNumber(objectSuffix)
+	return
 }
