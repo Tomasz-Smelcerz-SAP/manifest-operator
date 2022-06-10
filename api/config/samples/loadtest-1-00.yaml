@@ -1,9 +1,7 @@
 apiVersion: component.kyma-project.io/v1alpha1
 kind: Manifest
 metadata:
-  # Format for the name is <prefix>-<number>.
-  # The object number is used for cluster selection. To ensure equal distribution among clusters, it should grow by one for every new object.
-  name: loadtest-1-00
+  name: manifest11-for-ltkyma-12-13
 spec:
   charts: 
   - releaseName: "foobar" 
