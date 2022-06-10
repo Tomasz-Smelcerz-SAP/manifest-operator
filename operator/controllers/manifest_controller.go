@@ -469,6 +469,6 @@ func loadTestingNameParsing(manifestCRName string) (targetNamespace string, obje
 	objectSuffix = matches[0][2]
 	clusterIndexValue := matches[0][5]
 	targetNamespace = matches[0][4] + clusterIndexValue
-	clusterIndex, err = parseNumber(objectSuffix)
+	clusterIndex, err = parseNumber(clusterIndexValue)
 	return
 }
