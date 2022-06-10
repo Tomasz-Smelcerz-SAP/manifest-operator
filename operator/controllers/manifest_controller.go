@@ -381,7 +381,7 @@ func (r *ManifestReconciler) ResponseHandlerFunc(ctx context.Context, logger *lo
 	if errorState {
 		endState = v1alpha1.ManifestStateError
 	} else {
-		endState = v1alpha1.ManifestStateReady
+		endState = v1alpha1.ManifestStateProcessing
 	}
 
 	// update status for non-deletion scenarios
