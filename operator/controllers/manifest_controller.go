@@ -59,7 +59,6 @@ type RequestErrChan chan *RequestError
 
 type DeployInfo struct {
 	v1alpha1.ChartInfo
-	manifestKey client.ObjectKey
 	Mode
 	client.ObjectKey
 	RequestErrChan
@@ -301,7 +300,7 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	// evaluate create or delete chart
 	create := deployInfo.Mode == CreateMode
 
-	targetNamespace, objectSuffix, clusterIndexBase, err := loadTestingNameParsing(deployInfo.manifestKey.Name)
+	targetNamespace, objectSuffix, clusterIndexBase, err := loadTestingNameParsing(deployInfo.Name)
 	if err != nil {
 		return wErr(err)
 	}
