@@ -23,8 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"time"
-
 	"github.com/go-logr/logr"
 	"github.com/kyma-project/manifest-operator/api/api/v1alpha1"
 	"github.com/kyma-project/manifest-operator/operator/pkg/manifest"
@@ -300,18 +298,22 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 		url         = deployInfo.Url
 		chartName   = deployInfo.ChartName
 		releaseName = deployInfo.ReleaseName
+
+		err error
 	)
+
+	wErr := wrapErr(deployInfo.ObjectKey)
 
 	// evaluate create or delete chart
 	create := deployInfo.Mode == CreateMode
 
 	targetNamespace, objectSuffix, err := splitName(deployInfo.manifestKey.Name)
 	if err != nil {
-		return err
+		return wErr(err)
 	}
 	objectNumber, err := parseNumber(objectSuffix)
 	if err != nil {
-		return err
+		return wErr(err)
 	}
 
 	clusterIndex := objectNumber % len(r.ReconciliationTargetKubeconfigFiles)
@@ -322,13 +324,14 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 		"", kubeconfigFile,
 	)
 	if err != nil {
-		return fmt.Errorf(
+		return wErr(fmt.Errorf(
 			"unable to load kubeconfig from %s: %v",
 			kubeconfigFile, err,
-		)
+		))
 	}
 
 	indexedReleaseName := fmt.Sprintf("%s-%02d", releaseName, objectNumber)
+
 	// Enforcing target namespace
 	args["flags"] = args["flags"] + ",Namespace=" + targetNamespace + ",CreateNamespace=true"
 
@@ -336,7 +339,6 @@ func (r *ManifestReconciler) HandleCharts(deployInfo DeployInfo, logger *logr.Lo
 	logger.Info(fmt.Sprintf("Kubeconfig file: %s", kubeconfigFile))
 
 	manifestOperations := manifest.NewOperations(logger, restConfig, cli.New(), WaitTimeout)
-	var err error
 
 	if create {
 		err = manifestOperations.Install("", releaseName, fmt.Sprintf("%s/%s", repoName, chartName), repoName, url, args)
@@ -454,4 +456,13 @@ func parseNumber(value string) (int, error) {
 	}
 
 	return res, nil
+}
+
+func wrapErr(namespacedName client.ObjectKey) func(error) *RequestError {
+	return func(err error) *RequestError {
+		return &RequestError{
+			ResNamespacedName: namespacedName,
+			Err:               err,
+		}
+	}
 }
