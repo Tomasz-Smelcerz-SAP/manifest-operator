@@ -59,14 +59,14 @@ spec:
         env:
         - name: RECONCILIATION_TARGET_KUBECONFIG_0
           value: "/etc/manifest-operator-targets-config/kubeconfig-tsm02.yaml"
-        - name: RECONCILIATION_TARGET_KUBECONFIG_1
-          value: "/etc/manifest-operator-targets-config/kubeconfig-tsm03.yaml"
-        - name: RECONCILIATION_TARGET_KUBECONFIG_2
-          value: "/etc/manifest-operator-targets-config/kubeconfig-tsm04.yaml"
-        - name: RECONCILIATION_TARGET_KUBECONFIG_3
-          value: "/etc/manifest-operator-targets-config/kubeconfig-tsm05.yaml"
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: "/etc/manifest-operator-targets-config/gcp-service-account-key.json"
+        # - name: RECONCILIATION_TARGET_KUBECONFIG_1
+        #  value: "/etc/manifest-operator-targets-config/kubeconfig-tsm03.yaml"
+        # - name: RECONCILIATION_TARGET_KUBECONFIG_2
+        #  value: "/etc/manifest-operator-targets-config/kubeconfig-tsm04.yaml"
+        # - name: RECONCILIATION_TARGET_KUBECONFIG_3
+        #  value: "/etc/manifest-operator-targets-config/kubeconfig-tsm05.yaml"
+        # - name: GOOGLE_APPLICATION_CREDENTIALS
+        #  value: "/etc/manifest-operator-targets-config/gcp-service-account-key.json"
         volumeMounts:
         - name: manifest-operator-targets
           mountPath: "/etc/manifest-operator-targets-config"

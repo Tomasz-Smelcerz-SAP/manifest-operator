@@ -126,9 +126,9 @@ func (r *ManifestReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	case v1alpha1.ManifestStateDeleting:
 		return ctrl.Result{}, r.HandleDeletingState(ctx, &logger, &manifestObj)
 	case v1alpha1.ManifestStateError:
-		return ctrl.Result{RequeueAfter: time.Second * 600}, r.HandleErrorState(ctx, &logger, &manifestObj)
+		return ctrl.Result{RequeueAfter: time.Second * 120}, r.HandleErrorState(ctx, &logger, &manifestObj)
 	case v1alpha1.ManifestStateReady:
-		return ctrl.Result{RequeueAfter: time.Second * 3600}, r.HandleReadyState(ctx, &logger, &manifestObj)
+		return ctrl.Result{RequeueAfter: time.Second * 600}, r.HandleReadyState(ctx, &logger, &manifestObj)
 	}
 
 	// should not be reconciled again
