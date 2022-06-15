@@ -51,11 +51,11 @@ spec:
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
           limits:
-            cpu: 2000m
-            memory: 1Gi
+            cpu: 3000m
+            memory: 2Gi
           requests:
-            cpu: 100m
-            memory: 256Mi
+            cpu: 2000m
+            memory: 1Mi
         env:
         - name: RECONCILIATION_TARGET_KUBECONFIG_0
           value: "/etc/manifest-operator-targets-config/kubeconfig-tsm02.yaml"
