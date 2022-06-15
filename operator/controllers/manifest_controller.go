@@ -51,7 +51,7 @@ const (
 )
 
 const (
-	DefaultWorkersCount               = 4
+	DefaultWorkersCount               = 8
 	WaitTimeout         time.Duration = 5 * time.Minute
 )
 
