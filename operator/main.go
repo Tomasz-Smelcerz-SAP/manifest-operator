@@ -56,8 +56,12 @@ func main() {
 	var metricsAddr string
 	var enableLeaderElection bool
 	var probeAddr string
+	var clientQps float64
+	var clientBurst int
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":2020", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":2021", "The address the probe endpoint binds to.")
+	flag.Float64Var(&clientQps, "in-cluster-client-qps", 150.0, "in-cluster K8s client QPS")
+	flag.IntVar(&clientBurst, "in-cluster-client-burst", 150, "in-cluster K8s client burst for throttle")
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
@@ -88,7 +92,11 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	clientConfig := ctrl.GetConfigOrDie()
+	clientConfig.QPS = float32(clientQps)
+	clientConfig.Burst = clientBurst
+
+	mgr, err := ctrl.NewManager(clientConfig, ctrl.Options{
 		Scheme:                 scheme,
 		MetricsBindAddress:     metricsAddr,
 		Port:                   9443,

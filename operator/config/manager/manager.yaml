@@ -51,22 +51,16 @@ spec:
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
           limits:
-            cpu: 3000m
-            memory: 2Gi
+            cpu: 8000m
+            memory: 4Gi
           requests:
-            cpu: 2000m
-            memory: 1Mi
+            cpu: 4000m
+            memory: 1Gi
         env:
         - name: RECONCILIATION_TARGET_KUBECONFIG_0
-          value: "/etc/manifest-operator-targets-config/kubeconfig-tsm02.yaml"
-        # - name: RECONCILIATION_TARGET_KUBECONFIG_1
-        #  value: "/etc/manifest-operator-targets-config/kubeconfig-tsm03.yaml"
-        # - name: RECONCILIATION_TARGET_KUBECONFIG_2
-        #  value: "/etc/manifest-operator-targets-config/kubeconfig-tsm04.yaml"
-        # - name: RECONCILIATION_TARGET_KUBECONFIG_3
-        #  value: "/etc/manifest-operator-targets-config/kubeconfig-tsm05.yaml"
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: "/etc/manifest-operator-targets-config/gcp-service-account-key.json"
+          value: "/etc/manifest-operator-targets-config/kubeconfig--jellyfish--worker1.yaml"
+        - name: RECONCILIATION_TARGET_KUBECONFIG_1
+          value: "/etc/manifest-operator-targets-config/kubeconfig--jellyfish--worker2.yaml"
         volumeMounts:
         - name: manifest-operator-targets
           mountPath: "/etc/manifest-operator-targets-config"

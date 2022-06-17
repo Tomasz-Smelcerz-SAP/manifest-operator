@@ -28,6 +28,7 @@ import (
 	"github.com/kyma-project/manifest-operator/api/api/v1alpha1"
 	"github.com/kyma-project/manifest-operator/operator/pkg/manifest"
 	"github.com/pkg/errors"
+	"golang.org/x/time/rate"
 	"helm.sh/helm/v3/pkg/cli"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,11 +37,13 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/ratelimiter"
 )
 
 type Mode int
@@ -51,7 +54,7 @@ const (
 )
 
 const (
-	DefaultWorkersCount               = 8
+	DefaultWorkersCount               = 10
 	WaitTimeout         time.Duration = 5 * time.Minute
 )
 
@@ -391,6 +394,12 @@ func (r *ManifestReconciler) ResponseHandlerFunc(ctx context.Context, logger *lo
 	return
 }
 
+func CustomRateLimiter() ratelimiter.RateLimiter {
+	return workqueue.NewMaxOfRateLimiter(
+		workqueue.NewItemExponentialFailureRateLimiter(1*time.Second, 1000*time.Second),
+		&workqueue.BucketRateLimiter{Limiter: rate.NewLimiter(rate.Limit(30), 200)})
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ManifestReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
 	r.DeployChan = make(chan DeployInfo)
@@ -410,6 +419,7 @@ func (r *ManifestReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Mana
 		For(&v1alpha1.Manifest{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: DefaultWorkersCount,
+			RateLimiter:             CustomRateLimiter(),
 		}).
 		Complete(r)
 }
