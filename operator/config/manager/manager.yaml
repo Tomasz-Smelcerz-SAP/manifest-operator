@@ -52,10 +52,10 @@ spec:
         resources:
           limits:
             cpu: 8000m
-            memory: 4Gi
+            memory: 5Gi
           requests:
-            cpu: 4000m
-            memory: 1Gi
+            cpu: 6000m
+            memory: 4Gi
         env:
         - name: RECONCILIATION_TARGET_KUBECONFIG_0
           value: "/etc/manifest-operator-targets-config/kubeconfig--jellyfish--worker1.yaml"
